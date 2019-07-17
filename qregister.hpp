@@ -43,7 +43,8 @@ class QRegister {
     vector <complex<double> > getStateVector() { return stateVector; };
     void applyQFT();
     vector <complex<double> > tensorProduct(vector<Qubit>);
-    void matrixProduct(vector <complex<double> >, vector <complex<double> >);
+    void matrixProduct(vector< vector <complex<double> > >, vector <complex<double> >);
+    // void matrixProduct(vector <complex<double> >, vector <complex<double> >);
 };
 
 QRegister::QRegister() {
@@ -75,28 +76,24 @@ QRegister::QRegister(vector< vector <complex<double> > > qubitState) {
 void QRegister::applyQFT() {
   int n = qubitsNumber;
   int N = pow(2, n);
-  vector <complex<double> > QFTGate;
+  vector<vector <complex<double> > > QFTGate(N, vector <complex<double> >(N));
   complex<double> wm;
   complex<double> imaginaryValue = {0,1};
   double angle = (2*M_PI)/pow(2,n);
   double realPart, imaginaryPart;
-  for (int i = 0; i < N; i++)
+  #pragma omp parallel private(realPart, imaginaryPart, wm)
   {
-    for (int j = 0; j < N; j++)
+    for (int i = 0; i < N; i++)
     {
-      if (i==0)
-        QFTGate.push_back(1/sqrt(N));
-      else {
-        if (j==0)
-          QFTGate.push_back(1/sqrt(N));
-        else {
-          realPart = cos(angle*i*j);
-          imaginaryPart = sin(angle*i*j);
-          if (abs(realPart) < THRESHOLD) realPart = 0;
-          if (abs(imaginaryPart) < THRESHOLD) imaginaryPart = 0;
-          wm = realPart + imaginaryValue*imaginaryPart;
-          QFTGate.push_back(wm/sqrt(N));
-        }
+      #pragma omp for
+      for (int j = 0; j < N; j++)
+      {
+        realPart = cos(angle*i*j);
+        imaginaryPart = sin(angle*i*j);
+        if (abs(realPart) < THRESHOLD) realPart = 0;
+        if (abs(imaginaryPart) < THRESHOLD) imaginaryPart = 0;
+        wm = realPart + imaginaryValue*imaginaryPart;
+        QFTGate[i][j] = (wm/sqrt(N));
       }
     }
   }
@@ -120,23 +117,21 @@ vector <complex<double> > QRegister::tensorProduct(vector<Qubit> initialStatesMa
   return finalStatesVector;
 }
 
-void QRegister::matrixProduct(vector <complex<double> > operatorsVector, vector <complex<double> > statesVector) {
-  int sqrtOperatorsSize = sqrt(operatorsVector.size());
-  int statesSize = statesVector.size();
-  vector <complex<double> > resultVector;
+void QRegister::matrixProduct(vector< vector <complex<double> > > operatorsVector, vector <complex<double> > statesVector) {
+  vector <complex<double> > resultVector(operatorsVector.size());
   complex<double> val;
-  int countStatesVectorTimes = 0;
-  int operatorIndex = 0;
-  for (int i=0; i<sqrtOperatorsSize; i++) {
-    val={0,0};
-    for (int j=0; j<statesSize; j++) {
-      operatorIndex = j + (countStatesVectorTimes*sqrtOperatorsSize);
-      val=val+operatorsVector[operatorIndex]*statesVector[j];
+  int i,j;
+  #pragma omp parallel shared(val,operatorsVector,statesVector) private(i,j) 
+  {
+    #pragma omp for schedule(static)
+    for (i=0; i<operatorsVector.size(); i++) {
+      resultVector.at(i)={0,0};
+      for (j=0; j<statesVector.size(); j++) {
+        resultVector.at(i)=resultVector.at(i)+operatorsVector[i][j]*statesVector[j];
+        if (abs(resultVector.at(i).real()) < THRESHOLD) resultVector.at(i).real(0);
+        if (abs(resultVector.at(i).imag()) < THRESHOLD) resultVector.at(i).imag(0);
+      }
     }
-    if (abs(val.real()) < THRESHOLD) val.real(0);
-    if (abs(val.imag()) < THRESHOLD) val.imag(0);
-    resultVector.push_back(val);
-    countStatesVectorTimes++;
   }
   stateVector = resultVector;
 }
