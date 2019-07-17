@@ -5,6 +5,7 @@
 #include <complex>
 #include <map>
 #include <bitset>
+#include <omp.h>
 
 using namespace std;
 
@@ -82,21 +83,24 @@ void QRegister::applyQFT() {
   double realPart, imaginaryPart;
   for (int i = 0; i < N; i++)
   {
-    for (int j = 0; j < N; j++)
+    #pragma omp parallel
     {
-      if (i==0)
-        QFTGate.push_back(1/sqrt(N));
-      else {
-        if (j==0)
-          QFTGate.push_back(1/sqrt(N));
-        else {
-          realPart = cos(angle*i*j);
-          imaginaryPart = sin(angle*i*j);
-          if (abs(realPart) < THRESHOLD) realPart = 0;
-          if (abs(imaginaryPart) < THRESHOLD) imaginaryPart = 0;
-          wm = realPart + imaginaryValue*imaginaryPart;
-          QFTGate.push_back(wm/sqrt(N));
-        }
+      vector <complex<double> > QFTGateRowPrivate;
+      #pragma omp for nowait schedule(static)
+      for (int j = 0; j < N; j++)
+      {
+        realPart = cos(angle*i*j);
+        imaginaryPart = sin(angle*i*j);
+        if (abs(realPart) < THRESHOLD) realPart = 0;
+        if (abs(imaginaryPart) < THRESHOLD) imaginaryPart = 0;
+        wm = realPart + imaginaryValue*imaginaryPart;
+        QFTGateRowPrivate.push_back(wm/sqrt(N));
+      }
+      #pragma omp for schedule(static) ordered
+      for (int i = 0; i < omp_get_num_threads(); i++)
+      {
+        #pragma omp ordered
+        QFTGate.insert(QFTGate.end(), QFTGateRowPrivate.begin(), QFTGateRowPrivate.end());
       }
     }
   }
